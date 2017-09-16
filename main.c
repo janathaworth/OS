@@ -7,15 +7,17 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define MODES S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
 
 char* trim(char* str);
 void split(char* input, char** args);
 int isSymbol(char* str);
+int getfd();
 static void sig_handler(int signo);
 
-pid_t cpid;
+pid_t ch1_pid, ch2_pid, pid;
 char* symbol;
 
 int main () {
@@ -23,14 +25,8 @@ int main () {
 	int status, length;
 	char* input;
 	char** args;
-	// int file;
-
-	// int pipefd[2];
-
-	// if(pipe(pipefd) == -1) {
-	// 	perror("pipe");
-	// 	exit(EXIT_FAILURE);
-	// }
+	char** ptr;
+	int pipefd[2];
 
 	while(1){ 
 		printf("# ");
@@ -40,62 +36,92 @@ int main () {
 		}
 
 		input = trim(str);
-		int length = strlen(input);
+		length = strlen(input);
 		args = malloc(sizeof(char*)*length*sizeof(char)*length);
 		symbol = NULL;
 		split(input, args);
-	
-		cpid = fork();
-		if (cpid == -1) {
+
+		if(symbol != NULL && *symbol == '|'){
+			if(pipe(pipefd) == -1) {
+				perror("pipe");
+				exit(EXIT_FAILURE);
+			}
+		}
+
+
+		fprintf(stderr, "fork 1\n");
+		ch1_pid = fork();
+		if 	(ch1_pid == -1) {
 			perror("fork");
 			exit(EXIT_FAILURE);
 		}
+ 
+		if (ch1_pid == 0) {
 
-		//cpid = fork();
-		if (cpid == 0) {
+			if (symbol != NULL) { 
+				ptr = args; 
 
+				while(!isSymbol(*ptr)) {
+						ptr++;
+				}
+				symbol = *ptr; 
 
-		
-			if (symbol != NULL) {
-				//symb = malloc(sizeof(char)*2); 
-				char* symb = strdup(symbol);
-				char** ptr = args; 
-
-				//symbol is at symbol
-				while(*ptr != symbol) {
+				while(*ptr != NULL) {
+					*ptr = NULL;
 					ptr++;
-				}
 
-				*ptr = NULL;
+					if (*symbol == '|') {
+						close(pipefd[0]); //close read end
+						dup2(pipefd[1], STDOUT_FILENO);
+					}
+					else {
+						int file = -1;  
+						int fd = getfd();
+						if(fd == STDIN_FILENO) 
+							file  = open(*ptr, O_RDONLY, MODES);
+						else if (fd == STDOUT_FILENO || fd == STDERR_FILENO)
+							file = open(*ptr, O_CREAT | O_TRUNC | O_WRONLY, MODES);
 
+						if (file == -1) {
+							fprintf(stderr,"yash: %s: %s\n", *ptr, strerror(errno));
+							exit(EXIT_FAILURE);	
+						}
 
-				if (*symb == '>') {
-					int out = dup(1);
-					int file = open(*(ptr + 1), O_CREAT| O_TRUNC| O_WRONLY, MODES);
-					dup2(file, 1);
-					//close(file);
-					//dup2(stdout, 1)
-				}
-				else if(strcmp(symb, "2>") == 0) {
-					int err = dup(2);
-					int file = open(*(ptr + 1), O_CREAT| O_TRUNC| O_WRONLY, MODES);
-					dup2(file, 2);
+						dup2(file, fd);
+					}
+
+					//go to next symbol if it exists
+					while(!isSymbol(*ptr) && *ptr != NULL) {
+						ptr++;
+					}
+					symbol = *ptr;		
 				}
 			}
-	
-			// if( file = open(*(ptr + 1), O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR) == -1) {
-			// 	fprintf(stderr, "yash: cannot open file");
-			// 	exit(EXIT_FAILURE);	
-			// }
-
 
 			execvp(*args, args);
 			//need to break if input wrong and can print message in parent
-			printf("yash: %s: command not found\n", *args);
+			fprintf(stderr, "yash: %s: command not found\n", *args);
 			exit(EXIT_FAILURE);	
 		} else {
-			waitpid(cpid, &status, 0);
-			free(args);
+			// if(*symbol == '|') {
+			// 	//code here
+			// }
+			// fprintf(stderr,"fork 2\n");
+			// ch2_pid = fork();
+			// if (ch2_pid == 0) {
+			// 	close(pipefd[1]); //close write end
+			// 	dup2(pipefd[0], STDIN_FILENO);
+			// 	// fprintf(stderr,*ptr);
+			// 	//execvp
+			// }
+			// else {
+				if (waitpid(ch1_pid, &status, 0) == -1) {
+					perror("waitpid");
+					exit(EXIT_FAILURE);
+				}
+				free(args);
+			// }
+			
 //			if(WIFEXITED(status)) {
 //				printf("child done");
 //			} else if(WIFSIGNALED(status)){
@@ -124,7 +150,7 @@ char* trim(char* str) {
 void split(char* input, char** args){
 	*args = strtok(input, " ");
 	while(*args != NULL){
-		if(isSymbol(*args))
+		if(isSymbol(*args)) 
 			symbol = *args;
 		args++;
 		*args = strtok(NULL, " ");
@@ -138,11 +164,22 @@ int isSymbol(char* str){
 		|| strcmp(str, "|") == 0)) ? 1 : 0;
 }
 
+int getfd() {
+	if (*symbol == '<') 
+		return STDIN_FILENO;
+	else if (*symbol == '>') 
+		return STDOUT_FILENO;
+	else if(strcmp(symbol, "2>") == 0)
+		return STDERR_FILENO;
+	else 
+		return -1;
+}
+
 static void sig_handler(int signo) {
 	switch(signo){
 		case SIGINT:
 			//change to -pid to send to group
-		 	kill(cpid, SIGINT);	
+		 	kill(ch1_pid, SIGINT);	
 			break;
 	}
 }
