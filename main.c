@@ -14,6 +14,7 @@
 char* trim(char* str);
 void split(char* input, char** args);
 int isSymbol(char* str);
+void redirect(char* filename);
 int getfd();
 static void sig_handler(int signo);
 
@@ -27,6 +28,9 @@ int main () {
 	char** args;
 	char** ptr;
 	int pipefd[2];
+	int count = 0; 
+
+	pid = getpid();
 
 	while(1){ 
 		printf("# ");
@@ -49,7 +53,7 @@ int main () {
 		}
 
 
-		fprintf(stderr, "fork 1\n");
+		// fprintf(stderr, "fork 1\n");
 		ch1_pid = fork();
 		if 	(ch1_pid == -1) {
 			perror("fork");
@@ -62,65 +66,96 @@ int main () {
 				ptr = args; 
 
 				while(!isSymbol(*ptr)) {
-						ptr++;
+					// fprintf(stderr, *ptr);
+					ptr++;
 				}
 				symbol = *ptr; 
+				// fprintf(stderr, symbol);
 
 				while(*ptr != NULL) {
+					symbol = *ptr;	
 					*ptr = NULL;
 					ptr++;
 
 					if (*symbol == '|') {
 						close(pipefd[0]); //close read end
-						dup2(pipefd[1], STDOUT_FILENO);
+						dup2(pipefd[1], STDOUT_FILENO); //output to pipe
+						break;
 					}
 					else {
-						int file = -1;  
-						int fd = getfd();
-						if(fd == STDIN_FILENO) 
-							file  = open(*ptr, O_RDONLY, MODES);
-						else if (fd == STDOUT_FILENO || fd == STDERR_FILENO)
-							file = open(*ptr, O_CREAT | O_TRUNC | O_WRONLY, MODES);
-
-						if (file == -1) {
-							fprintf(stderr,"yash: %s: %s\n", *ptr, strerror(errno));
-							exit(EXIT_FAILURE);	
-						}
-
-						dup2(file, fd);
+						redirect(*ptr);
 					}
 
 					//go to next symbol if it exists
 					while(!isSymbol(*ptr) && *ptr != NULL) {
 						ptr++;
-					}
-					symbol = *ptr;		
+					}	
 				}
 			}
 
 			execvp(*args, args);
-			//need to break if input wrong and can print message in parent
 			fprintf(stderr, "yash: %s: command not found\n", *args);
 			exit(EXIT_FAILURE);	
 		} else {
-			// if(*symbol == '|') {
-			// 	//code here
-			// }
-			// fprintf(stderr,"fork 2\n");
-			// ch2_pid = fork();
-			// if (ch2_pid == 0) {
-			// 	close(pipefd[1]); //close write end
-			// 	dup2(pipefd[0], STDIN_FILENO);
-			// 	// fprintf(stderr,*ptr);
-			// 	//execvp
-			// }
-			// else {
-				if (waitpid(ch1_pid, &status, 0) == -1) {
+			//fprintf(stderr, symbol);
+
+			if(symbol != NULL && *symbol == '|') {
+				//code here
+				// fprintf(stderr,"fork 2\n");
+				ch2_pid = fork();
+				if (ch2_pid == 0) {
+					close(pipefd[1]); //close write end
+					dup2(pipefd[0], STDIN_FILENO); // take input from STDIN
+					while (*args != symbol) {
+						args++;
+					}
+					args++;
+
+					ptr = args;
+					while(!isSymbol(*ptr) && *ptr != NULL) {
+						ptr++;
+					}
+					
+					while(*ptr != NULL) {
+						symbol = *ptr;	
+						*ptr = NULL;
+						ptr++;
+						//fprintf(stderr, symbol);
+						redirect(*ptr);
+
+						//go to next symbol if it exists
+						while(!isSymbol(*ptr) && *ptr != NULL) {
+							ptr++;
+						}	
+					}
+
+					execvp(*args, args);
+					fprintf(stderr, "yash: %s: command not found\n", *args);
+					exit(EXIT_FAILURE);	
+				//execvp
+				}
+				else {
+					close(pipefd[0]);
+					close(pipefd[1]);
+
+			
+					if (waitpid(-1, &status, 0) == -1) {
+						perror("waitpid");
+						exit(EXIT_FAILURE);
+					}
+				}
+			}
+
+			if(getpid() == pid){ 
+				//parent
+				// fprintf(stderr, "parent\n");
+
+				if (waitpid(-1, &status, 0) == -1) {
 					perror("waitpid");
 					exit(EXIT_FAILURE);
 				}
 				free(args);
-			// }
+			}
 			
 //			if(WIFEXITED(status)) {
 //				printf("child done");
@@ -164,7 +199,24 @@ int isSymbol(char* str){
 		|| strcmp(str, "|") == 0)) ? 1 : 0;
 }
 
+void redirect(char* filename) {
+	int file = -1;  
+	int fd = getfd();
+	if(fd == STDIN_FILENO) 
+		file  = open(filename, O_RDONLY, MODES);
+	else if (fd == STDOUT_FILENO || fd == STDERR_FILENO)
+		file = open(filename, O_CREAT | O_TRUNC | O_WRONLY, MODES);
+
+	if (file == -1) {
+		fprintf(stderr,"yash: %s: %s\n", filename, strerror(errno));
+		exit(EXIT_FAILURE);	
+	}
+
+	dup2(file, fd);
+}
+
 int getfd() {
+	//strcmp??
 	if (*symbol == '<') 
 		return STDIN_FILENO;
 	else if (*symbol == '>') 
