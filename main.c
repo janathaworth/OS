@@ -38,6 +38,7 @@ int main () {
 		printf("# ");
 		if(fgets(str, 2000, stdin) == NULL){
 			//does not work for children (when written - child would not get here)
+			//printf("exit\n");
 			raise(SIGINT);
 		}
 
@@ -66,37 +67,31 @@ int main () {
 		if (ch1_pid == 0) {
 
 			if (symbol_ptr != NULL) { 
+
+				if(pipe_ptr != NULL) {
+					close(pipefd[0]); //close read end
+					dup2(pipefd[1], STDOUT_FILENO); //output to pipe
+					close(pipefd[1]);
+				}
 				ptr = args; 
 
+				//find first symbol
 				while(!isSymbol(*ptr)) {
 					ptr++;
-				}
-				symbol_ptr = *ptr; 
+				} 
 
-				// fprintf(stderr,"symb");
-				// fprintf(stderr, symbol_ptr);
-
-				while(*ptr != NULL) {
+				while(*ptr != NULL && !isPipe(*ptr)) {
 					symbol_ptr = *ptr;	
 					*ptr = NULL;
 					ptr++;
-
-					if (isPipe(symbol_ptr)) {
-						close(pipefd[0]); //close read end
-						dup2(pipefd[1], STDOUT_FILENO); //output to pipe
-						// fprintf(stderr, "found pipe\n");
-						break;
-					}
-
-					else {
-						redirect(*ptr);
-					}
+					redirect(*ptr);
 
 					//go to next symbol if it exists
 					while(!isSymbol(*ptr) && *ptr != NULL) {
 						ptr++;
 					}	
 				}
+				*ptr = NULL;
 			}
 
 			execvp(*args, args);
@@ -112,6 +107,8 @@ int main () {
 				if (ch2_pid == 0) {
 					close(pipefd[1]); //close write end
 					dup2(pipefd[0], STDIN_FILENO); // take input from STDIN
+					close(pipefd[0]);
+
 					while (*args != pipe_ptr) {
 						args++;
 					}
@@ -140,7 +137,6 @@ int main () {
 					execvp(*args, args);
 					fprintf(stderr, "yash: %s: command not found\n", *args);
 					exit(EXIT_FAILURE);	
-				//execvp
 				}
 				else {
 					close(pipefd[0]);
@@ -227,6 +223,7 @@ void redirect(char* filename) {
 	}
 
 	dup2(file, fd);
+	close(file);
 }
 
 int getfd() {
