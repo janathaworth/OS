@@ -14,12 +14,14 @@
 char* trim(char* str);
 void split(char* input, char** args);
 int isSymbol(char* str);
+int isPipe(char* str);
 void redirect(char* filename);
 int getfd();
 static void sig_handler(int signo);
 
 pid_t ch1_pid, ch2_pid, pid;
-char* symbol;
+char* symbol_ptr;
+char* pipe_ptr = 0; 
 
 int main () {
 	char str[2000];
@@ -42,10 +44,11 @@ int main () {
 		input = trim(str);
 		length = strlen(input);
 		args = malloc(sizeof(char*)*length*sizeof(char)*length);
-		symbol = NULL;
+		symbol_ptr = NULL;
+		pipe_ptr = NULL;
 		split(input, args);
 
-		if(symbol != NULL && *symbol == '|'){
+		if(pipe_ptr != NULL){
 			if(pipe(pipefd) == -1) {
 				perror("pipe");
 				exit(EXIT_FAILURE);
@@ -62,26 +65,29 @@ int main () {
  
 		if (ch1_pid == 0) {
 
-			if (symbol != NULL) { 
+			if (symbol_ptr != NULL) { 
 				ptr = args; 
 
 				while(!isSymbol(*ptr)) {
-					// fprintf(stderr, *ptr);
 					ptr++;
 				}
-				symbol = *ptr; 
-				// fprintf(stderr, symbol);
+				symbol_ptr = *ptr; 
+
+				// fprintf(stderr,"symb");
+				// fprintf(stderr, symbol_ptr);
 
 				while(*ptr != NULL) {
-					symbol = *ptr;	
+					symbol_ptr = *ptr;	
 					*ptr = NULL;
 					ptr++;
 
-					if (*symbol == '|') {
+					if (isPipe(symbol_ptr)) {
 						close(pipefd[0]); //close read end
 						dup2(pipefd[1], STDOUT_FILENO); //output to pipe
+						// fprintf(stderr, "found pipe\n");
 						break;
 					}
+
 					else {
 						redirect(*ptr);
 					}
@@ -99,14 +105,14 @@ int main () {
 		} else {
 			//fprintf(stderr, symbol);
 
-			if(symbol != NULL && *symbol == '|') {
+			if(pipe_ptr != NULL) {
 				//code here
 				// fprintf(stderr,"fork 2\n");
 				ch2_pid = fork();
 				if (ch2_pid == 0) {
 					close(pipefd[1]); //close write end
 					dup2(pipefd[0], STDIN_FILENO); // take input from STDIN
-					while (*args != symbol) {
+					while (*args != pipe_ptr) {
 						args++;
 					}
 					args++;
@@ -116,8 +122,9 @@ int main () {
 						ptr++;
 					}
 					
+					// fprintf(stderr, *ptr);
 					while(*ptr != NULL) {
-						symbol = *ptr;	
+						symbol_ptr = *ptr;	
 						*ptr = NULL;
 						ptr++;
 						//fprintf(stderr, symbol);
@@ -129,6 +136,7 @@ int main () {
 						}	
 					}
 
+					waitpid(ch1_pid, &status, 0);
 					execvp(*args, args);
 					fprintf(stderr, "yash: %s: command not found\n", *args);
 					exit(EXIT_FAILURE);	
@@ -185,8 +193,10 @@ char* trim(char* str) {
 void split(char* input, char** args){
 	*args = strtok(input, " ");
 	while(*args != NULL){
-		if(isSymbol(*args)) 
-			symbol = *args;
+		if(isSymbol(*args))
+			symbol_ptr = *args;
+		if(isPipe(*args))
+			pipe_ptr = *args;
 		args++;
 		*args = strtok(NULL, " ");
 	}
@@ -196,7 +206,11 @@ void split(char* input, char** args){
 int isSymbol(char* str){
 	return (str != NULL && (strcmp(str, "<") == 0
 		|| strcmp(str,">") == 0 || strcmp(str, "2>") == 0
-		|| strcmp(str, "|") == 0)) ? 1 : 0;
+		|| strcmp(str,"|") == 0)) ? 1 : 0;
+}
+
+int isPipe(char* str) {
+	return (strcmp(str, "|") == 0) ? 1 : 0;
 }
 
 void redirect(char* filename) {
@@ -217,11 +231,11 @@ void redirect(char* filename) {
 
 int getfd() {
 	//strcmp??
-	if (*symbol == '<') 
+	if (*symbol_ptr == '<') 
 		return STDIN_FILENO;
-	else if (*symbol == '>') 
+	else if (*symbol_ptr == '>') 
 		return STDOUT_FILENO;
-	else if(strcmp(symbol, "2>") == 0)
+	else if(strcmp(symbol_ptr, "2>") == 0)
 		return STDERR_FILENO;
 	else 
 		return -1;
