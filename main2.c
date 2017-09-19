@@ -35,7 +35,7 @@ static void sig_tstp(int signo);
 // to figure out why setpgid(0,0) messed with the input/output of pipe neither 
 // by myself nor with the help of Dr. Yeraballi. Thus, he suggested this method. 
 
-pid_t ch1_pid, ch2_pid, yash_pid, cmd_pid, fg;
+pid_t ch1_pid, ch2_pid, yash_pid, cmds_pid;
 char* symbol_ptr;
 char* pipe_ptr; 
 
@@ -43,7 +43,7 @@ int main () {
 	char str[2000];
 	int status, length;
 	char* input;
-	char** args, ptr, cmds;
+	char** args, ptr, args;
 	int pipefd[2];
 	int count = 0; 
 
@@ -61,8 +61,8 @@ int main () {
 		printf("# ");
 		if(fgets(str, 2000, stdin) == NULL){
 			printf("exit\n");
-			if (cmd_pid > 0 && kill(-cmd_pid, 0) != -1) {
-				kill(-cmd_pid, SIGTERM);
+			if (cmds_pid > 0 && kill(-cmds_pid, 0) != -1) {
+				kill(-cmds_pid, SIGTERM);
 			}
 			exit(EXIT_SUCCESS);
 		}
@@ -74,21 +74,21 @@ int main () {
 		pipe_ptr = NULL;
 		split(input, args);
 
-		cmd_pid = fork();
+		cmds_pid = fork();
 
-		if 	(cmd_pid == -1) {
+		if 	(cmds_pid == -1) {
 			perror("fork");
 			exit(EXIT_FAILURE);
 		}
 
-		else if (cmd_pid > 0) {
+		else if (cmds_pid > 0) {
 			//shell
-			if (waitpid(cmd_pid, &status, 0) == -1) {
+			if (waitpid(cmds_pid, &status, 0) == -1) {
 				perror("waitpid");
 				exit(EXIT_FAILURE);
 			}
 		} else {
-			//cmd 
+			//cmds 
 			if (signal(SIGINT, SIG_DFL) == SIG_ERR) {
 				perror("signal(SIGINT) error");
 			}
@@ -117,7 +117,7 @@ int main () {
 			}
 
 			else if (ch1_pid > 0) {
-				//cmd
+				//cmds
 
 				if (pipe_ptr != NULL) {
 					ch2_pid = fork(); 
@@ -127,7 +127,7 @@ int main () {
 						exit(EXIT_FAILURE);
 					} 
 					else if (ch2_pid > 0) {
-						//cmd
+						//cmds
 						close(pipefd[0]);
 						close(pipefd[1]);
 
@@ -152,7 +152,7 @@ int main () {
 					}
 				}
 
-				//cmd
+				//cmds
 				if (waitpid(-1, &status, 0) == -1) {
 					perror("waitpid");
 					exit(EXIT_FAILURE);
@@ -264,9 +264,8 @@ int getfd() {
 }
 
 static void sig_int(int signo) {
-	fg = tcgetpgrp(STDIN_FILENO);
-	if (cmd_pid > 0 && kill(-cmd_pid,0) != -1) {
-		kill(-cmd_pid, SIGINT);
+	if (cmds_pid > 0 && kill(-cmds_pid,0) != -1) {
+		kill(-cmds_pid, SIGINT);
 		printf("\n");
 	}
 	else {
@@ -277,7 +276,7 @@ static void sig_int(int signo) {
 }
 
 static void sig_tstp(int signo) {
-	if (cmd_pid > 0 && kill(-cmd_pid,0) != -1) {
-		kill(-cmd_pid, SIGTSTP);
+	if (cmds_pid > 0 && kill(-cmds_pid,0) != -1) {
+		kill(-cmds_pid, SIGTSTP);
 	}
 }
