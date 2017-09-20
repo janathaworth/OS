@@ -1,10 +1,8 @@
 all: yash 
 
-yash: main.o 
-	gcc main.o -o yash
+yash: main.c 
+	gcc main.c -o yash
 
-main.o: main.c
-	gcc -c main.c
 
 
 
